@@ -19,6 +19,13 @@ except ImportError:
     print("pip install arabic-reshaper python-bidi")
     exit()
 
+# استخدام OpenCV بدلاً من onnxruntime
+try:
+    import cv2
+except ImportError:
+    print("خطأ: مكتبة OpenCV غير مثبتة. يرجى تثبيتها عبر: pip install opencv-python")
+    exit()
+
 from PIL import Image, ImageOps
 
 # مكتبات Kivy
@@ -38,7 +45,7 @@ from kivy.graphics import Color, RoundedRectangle
 
 
 # ---------------------------------------------------------
-# دالة ذكية لمعرفة المسار الحالي للملفات (ضرورية جداً لعمل الـ APK)
+# دالة لمعرفة المسار الحالي للملفات (ضرورية لعمل الـ APK)
 def get_resource_path(filename):
     base_path = os.path.abspath(os.path.dirname(__file__))
     return os.path.join(base_path, filename)
@@ -49,20 +56,14 @@ FONT_PATH = get_resource_path("arial.ttf")
 if os.path.exists(FONT_PATH):
     LabelBase.register(DEFAULT_FONT, FONT_PATH)
 else:
-    print(f"تنبيه: ملف الخط '{FONT_PATH}' غير موجود. قد تظهر الحروف العربية كمربعات.")
+    print(f"تنبيه: ملف الخط '{FONT_PATH}' غير موجود.")
 
-# مسار نموذج الذكاء الاصطناعي (تأكد من عدم وجود مسافات في الاسم)
+# مسار نموذج الذكاء الاصطناعي
 ONNX_MODEL_PATH = get_resource_path("holako_bag.onnx")
 
-# رابط السيرفر الخاص بك على بايثون أني وير (استبدل yourusername باسم حسابك)
+# رابط سيرفر بايثون أني وير للتحكم بالتشغيل والإطفاء (استبدل yourusername)
 PYTHONANYWHERE_URL = "https://hosalin.pythonanywhere.com/status"
 # ---------------------------------------------------------
-
-try:
-    import onnxruntime as ort
-except ImportError:
-    print("خطأ: مكتبة onnxruntime غير مثبتة.")
-    exit()
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -74,9 +75,6 @@ NUM_POS = 5
 
 
 def ar(text):
-    """
-    دالة لمعالجة الحروف العربية المتقطعة والمعكوسة.
-    """
     try:
         reshaped_text = arabic_reshaper.reshape(str(text))
         bidi_text = get_display(reshaped_text)
@@ -109,13 +107,14 @@ class CaptchaApp(App):
         self.current_captcha = None
         self.session = None
 
+        # تحميل النموذج باستخدام OpenCV
         if not os.path.exists(ONNX_MODEL_PATH):
             print(ar("خطأ فادح: ملف نموذج ONNX غير موجود."))
         else:
             try:
-                self.session = ort.InferenceSession(ONNX_MODEL_PATH, providers=['CPUExecutionProvider'])
+                self.net = cv2.dnn.readNetFromONNX(ONNX_MODEL_PATH)
             except Exception as e:
-                print(ar("خطأ في تحميل النموذج:") + f" {e}")
+                print(ar("خطأ في تحميل النموذج عبر OpenCV:") + f" {e}")
 
         self.main_layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
 
@@ -129,7 +128,7 @@ class CaptchaApp(App):
         self.btn_add = Button(text=ar("إضافة حساب"), size_hint_y=None, height=50, font_size=18)
         self.btn_add.bind(on_press=self.add_account_popup)
         self.main_layout.add_widget(self.btn_add)
-        self.btn_add.disabled = True  # يتم التعطيل حتى يتحقق من السيرفر
+        self.btn_add.disabled = True
 
         self.scroll_view = ScrollView()
         self.accounts_frame = BoxLayout(orientation='vertical', size_hint_y=None, spacing=15)
@@ -146,7 +145,6 @@ class CaptchaApp(App):
         return self.main_layout
 
     def on_start(self):
-        # فحص التفعيل فور تشغيل الواجهة
         self.show_server_checking_popup()
 
     def show_server_checking_popup(self):
@@ -213,6 +211,14 @@ class CaptchaApp(App):
             "Content-Type": "application/json",
             "Origin": "https://ecsc.gov.sy",
             "Referer": "https://ecsc.gov.sy/",
+            "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "Source": "WEB",  # هذه الترويسة غالباً هي سبب الرفض!
+            "Host": "api.ecsc.gov.sy:8443",
             "Connection": "keep-alive",
         }
         session = requests.Session()
@@ -274,11 +280,18 @@ class CaptchaApp(App):
             try:
                 self.update_notification(f"[{username}] محاولة الدخول ({attempt + 1}/{retries})...", "grey")
                 r = session.post(url, json=payload, headers=login_headers, timeout=(10, 20))
+
                 if r.status_code == 200:
                     self.update_notification(f"[{username}] تم تسجيل الدخول بنجاح.", "green")
                     return True
                 elif r.status_code == 401:
                     self.update_notification(f"[{username}] فشل: بيانات الاعتماد غير صحيحة.", "red")
+                    return False
+                elif r.status_code == 400:
+                    # طباعة رد السيرفر لمعرفة ما ينقصنا بالضبط
+                    error_msg = r.text
+                    print(f"[DEBUG] 400 Bad Request Response: {error_msg}")
+                    self.update_notification(f"[{username}] فشل (400): {error_msg[:40]}", "red")
                     return False
                 else:
                     self.update_notification(f"[{username}] فشل تسجيل الدخول ({r.status_code}).", "red")
@@ -421,16 +434,19 @@ class CaptchaApp(App):
 
         start_predict = time.time()
         predicted_text = "error"
-        if self.session:
+        if hasattr(self, 'net'):
             try:
-                input_name = self.session.get_inputs()[0].name
-                ort_outs = self.session.run(None, {input_name: input_tensor})[0]
+                # استخدام OpenCV للتنبؤ بالنتيجة من النموذج
+                self.net.setInput(input_tensor)
+                ort_outs = self.net.forward()
+
                 expected_elements = NUM_POS * NUM_CLASSES
                 ort_outs_trimmed = ort_outs[:, :expected_elements]
                 ort_outs_reshaped = ort_outs_trimmed.reshape(1, NUM_POS, NUM_CLASSES)
                 predicted_indices = np.argmax(ort_outs_reshaped, axis=2)[0]
                 predicted_text = ''.join(IDX2CHAR[i] for i in predicted_indices if i in IDX2CHAR)
-            except Exception:
+            except Exception as e:
+                print(f"Prediction Error: {e}")
                 predicted_text = "predict_err"
         end_predict = time.time()
         return predicted_text, (end_preprocess - start_preprocess) * 1000, (end_predict - start_predict) * 1000
@@ -496,7 +512,6 @@ class CaptchaApp(App):
             response_text = r.text
 
             if r.status_code == 200:
-                # إذا كان الرد 200 وكان النص فارغاً تماماً أو به كلمات نجاح يتم التثبيت
                 if response_text.strip() == "" or "نجاح" in response_text or "success" in response_text.lower() or "تم الحجز" in response_text:
                     self.update_notification(f"[{task_user}] نجاح! تم الحجز وتثبيت المعاملة بنجاح.", "green")
                 elif "خطأ" in response_text or "incorrect" in response_text.lower() or "failed" in response_text.lower():
