@@ -22,7 +22,6 @@ jobs:
     - name: Run Buildozer
       run: |
         export PATH=$PATH:~/.local/bin
-        # تأكيد الموافقة على رخص الأندرويد وبدء التجميع
         yes | buildozer android debug
 
     - name: Upload APK
