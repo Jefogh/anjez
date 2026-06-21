@@ -5,7 +5,7 @@ package.domain = com.jefo
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,onnx,ttf
 version = 1.0.0
-requirements = python3,kivy,requests,urllib3,numpy,pillow,arabic_reshaper,python-bidi,opencv
+requirements = python3,kivy,requests,urllib3,numpy==1.26.4,pillow,arabic_reshaper,python-bidi,opencv
 orientation = portrait
 android.permissions = INTERNET
 android.api = 33
